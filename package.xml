@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<package>
+  <name>benchmark_2d_laser_odom</name>
+  <version>0.0.0</version>
+  <description>A benchmark package for 2D laser odometry</description>
+
+  <maintainer email="Deray@todo.todo">Jeremie Deray</maintainer>
+
+  <!-- One license tag required, multiple allowed, one license per tag -->
+  <!-- Commonly used license strings: -->
+  <!--   BSD, MIT, Boost Software License, GPLv2, GPLv3, LGPLv2.1, LGPLv3 -->
+  <license>TODO</license>
+
+  <!-- Author tags are optional, mutiple are allowed, one per tag -->
+  <!-- Authors do not have to be maintianers, but could be -->
+  <!-- Example: -->
+  <!-- <author email="jane.doe@example.com">Jane Doe</author> -->
+  <author>Jeremie Deray</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>rosbag</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>tf</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>pal_carmen_reader</build_depend>
+
+  <run_depend>rosbag</run_depend>
+  <run_depend>roscpp</run_depend>
+  <run_depend>tf</run_depend>
+  <run_depend>geometry_msgs</run_depend>
+  <run_depend>pal_carmen_reader</run_depend>
+
+  <export>
+  </export>
+</package>
