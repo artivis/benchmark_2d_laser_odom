@@ -21,13 +21,15 @@ else()
 endif()
 
 find_package(catkin REQUIRED COMPONENTS
-  rosbag
   roscpp
+  rosbag
   tf
   geometry_msgs
 #tf_conversions
 #cmake_modules
   pal_carmen_reader
+  laser_odometry_canonical
+  laser_odometry_gpar
 )
 
 ## System dependencies are found with CMake's conventions
