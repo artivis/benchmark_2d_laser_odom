@@ -8,8 +8,8 @@
 
   <arg name="visualization_sleep" default="0.005"/>
 
-  <!--arg name="laser_odometry_type" default="laser_odometry::LaserOdometryCanonical"/-->
-  <arg name="laser_odometry_type" default="laser_odometry::LaserOdometryGpar"/>
+  <arg name="laser_odometry_type" default="laser_odometry::LaserOdometryCanonical"/>
+  <!--arg name="laser_odometry_type" default="laser_odometry::LaserOdometryGpar"/-->
 
   <node pkg="benchmark_2d_laser_odom" type="carmen_benchmark" name="carmen_benchmark" output="screen">
     <param name="laser_odometry_type" value="$(arg laser_odometry_type)" />
