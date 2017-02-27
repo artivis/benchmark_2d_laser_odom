@@ -1,0 +1,20 @@
+<launch>
+
+  <!--arg name="input_file" default="$(find pal_carmen_reader)/data/mit-cscail.log"/-->
+  <!--arg name="input_file" default="$(find pal_carmen_reader)/data/fr-clinic.log"/-->
+  <!--arg name="input_file" default="$(find pal_carmen_reader)/data/fr079.log.log"/-->
+  <!--arg name="input_file" default="$(find pal_carmen_reader)/data/intel-lab.log"/-->
+  <arg name="input_file" default="$(find pal_carmen_reader)/data/raw/mit-csail.log"/>
+
+  <arg name="visualization_sleep" default="0.005"/>
+
+  <!--arg name="laser_odometry_type" default="laser_odometry::LaserOdometryCanonical"/-->
+  <arg name="laser_odometry_type" default="laser_odometry::LaserOdometryGpar"/>
+
+  <node pkg="benchmark_2d_laser_odom" type="carmen_benchmark" name="carmen_benchmark" output="screen">
+    <param name="laser_odometry_type" value="$(arg laser_odometry_type)" />
+    <param name="input_file" value="$(arg input_file)" />
+    <param name="visualization_sleep" value="$(arg visualization_sleep)" />
+  </node>
+
+</launch>
