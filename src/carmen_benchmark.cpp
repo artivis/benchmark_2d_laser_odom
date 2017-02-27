@@ -9,6 +9,8 @@
 #include <pal_carmen_reader/pal_carmen_reader.h>
 #include <laser_odometry_core/laser_odometry.h>
 
+#include <benchmark_2d_laser_odom/timer.h>
+
 using LocalizedRangeScan = std::pair<sensor_msgs::LaserScan, tf::Transform>;
 
 int main(int argc, char **argv)
@@ -24,11 +26,15 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  laser_odometry::LaserOdometryPtr laser_odom_ptr = std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
+  laser_odometry::LaserOdometryPtr laser_odom_ptr =
+      std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
 
   bool publish_tf = true;
   nh.param("publish_tf", publish_tf, publish_tf);
   laser_odom_ptr->broadcastTf(publish_tf);
+
+  bool use_odom_prior = false;
+  nh.param("use_odom_prior", use_odom_prior, use_odom_prior);
 
   double sleep(0.005);
   nh.param("visualization_sleep", sleep, sleep);
@@ -61,12 +67,10 @@ int main(int argc, char **argv)
 
     if (read_ok)
     {
-      tf::Vector3 basis(odometry.pose.pose.position.x,
-                        odometry.pose.pose.position.y,
-                        odometry.pose.pose.position.z);
-
       tf::Transform transform;
-      transform.setOrigin(basis);
+      transform.setOrigin(tf::Vector3{odometry.pose.pose.position.x,
+                                      odometry.pose.pose.position.y,
+                                      odometry.pose.pose.position.z});
 
       tf::Quaternion q;
       tf::quaternionMsgToTF(odometry.pose.pose.orientation, q);
@@ -118,8 +122,11 @@ int main(int argc, char **argv)
 //  lsr::geometry::RigidTransform3s tf_rel_est = lsr::geometry::Idendity3ds;
 
 //  pal_robot_tools::TimerData timer("toto");
+  pal::TimerU timer;
 
   tf::Transform corrected_pose;
+
+  tf::Transform initial_guess; initial_guess.setIdentity();
 
   std::size_t scan_id = 0;
   // Pass all scans
@@ -145,20 +152,23 @@ int main(int argc, char **argv)
     // Get current tf with respect to previous one
 //    const tf::Transform corrected_relative_pose = tf_prev.inverse() * corrected_pose;
 
-//    timer.startTimer();
-
     /* ----------- Everything Takes Place Here ---------- */
 
     geometry_msgs::PoseWithCovarianceStampedPtr estimated_pose;
     estimated_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
 
+    /// @todo
+    if (use_odom_prior) laser_odom_ptr->setInitialGuess(initial_guess);
+
     /*bool processed =*/ laser_odom_ptr->process(ros_scan, estimated_pose);
+
+    std::cout << "Process done." << std::endl;
 
     //  @todo.process(ros_scan, global_pose, relative_pose);
 
     /* -------------------------------------------------- */
 
-//   timer.stopTimer();
+   timer.tic();
 
 //    tf_est = @todo.getEstimatedPose();
 
@@ -184,30 +194,39 @@ int main(int argc, char **argv)
     //std::cout << "\n\n------Publishing Logs------\n\n" << std::endl;
 
 
+    bool sleep_pub = false;
+    if (publisher_corrected_poses.getNumSubscribers()>0)
+    {
+      geometry_msgs::Pose corrected_pose_msg2;
+      corrected_pose_msg2.position.x = corrected_pose_msg.translation.x;
+      corrected_pose_msg2.position.y = corrected_pose_msg.translation.y;
+      corrected_pose_msg2.position.z = corrected_pose_msg.translation.z;
+      corrected_pose_msg2.orientation = corrected_pose_msg.rotation;
 
-    geometry_msgs::Pose corrected_pose_msg2;
-    corrected_pose_msg2.position.x = corrected_pose_msg.translation.x;
-    corrected_pose_msg2.position.y = corrected_pose_msg.translation.y;
-    corrected_pose_msg2.position.z = corrected_pose_msg.translation.z;
+      corrected_poses.poses.push_back(corrected_pose_msg2);
+      corrected_poses.header.frame_id = estimated_pose->header.frame_id;
+      publisher_corrected_poses.publish(corrected_poses);
 
-    corrected_pose_msg2.orientation = corrected_pose_msg.rotation;
+      sleep_pub = true;
+    }
 
-    corrected_poses.poses.push_back(corrected_pose_msg2);
-    estimated_poses.poses.push_back(estimated_pose->pose.pose);
+    if (publisher_estimated_poses.getNumSubscribers()>0)
+    {
+      estimated_poses.poses.push_back(estimated_pose->pose.pose);
+      estimated_poses.header.frame_id = estimated_pose->header.frame_id;
+      publisher_estimated_poses.publish(estimated_poses);
 
-    corrected_poses.header.frame_id = estimated_pose->header.frame_id;
-    estimated_poses.header.frame_id = estimated_pose->header.frame_id;
-
-    publisher_estimated_poses.publish(estimated_poses);
-    publisher_corrected_poses.publish(corrected_poses);
+      sleep_pub = true;
+    }
 
     ros::spinOnce();
-    sleep_duration.sleep();
+
+    if (sleep_pub) sleep_duration.sleep();
 
 //    if (scan_id > 70) break;
   }
 
-//  std::cout << "Took in average : " << timer.getAverageCycleTime() << std::endl;
+  std::cout << "Took in average : " << timer.avg_tic() << " us." << std::endl;
 
   std::cout << "Done." << std::endl;
 
