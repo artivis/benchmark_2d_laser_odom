@@ -57,33 +57,33 @@ int main(int argc, char **argv)
   bool laser_transform_init = false;
   geometry_msgs::TransformStamped laser_transform;
 
+  sensor_msgs::LaserScanPtr laser = boost::make_shared<sensor_msgs::LaserScan>();
+  nav_msgs::OdometryPtr odometry = boost::make_shared<nav_msgs::Odometry>();
+  geometry_msgs::TransformStampedPtr transform_msg = boost::make_shared<geometry_msgs::TransformStamped>();
+
   do
   {
-    sensor_msgs::LaserScan laser;
-    nav_msgs::Odometry odometry;
-    geometry_msgs::TransformStamped transform_msg;
-
-    read_ok = carmen_reader_ptr_->readNext("ROBOTLASER1", &laser, &odometry, &transform_msg);
+    read_ok = carmen_reader_ptr_->readNext("ROBOTLASER1", laser, odometry, transform_msg);
 
     if (read_ok)
     {
       tf::Transform transform;
-      transform.setOrigin(tf::Vector3{odometry.pose.pose.position.x,
-                                      odometry.pose.pose.position.y,
-                                      odometry.pose.pose.position.z});
+      transform.setOrigin(tf::Vector3{odometry->pose.pose.position.x,
+                                      odometry->pose.pose.position.y,
+                                      odometry->pose.pose.position.z});
 
       tf::Quaternion q;
-      tf::quaternionMsgToTF(odometry.pose.pose.orientation, q);
+      tf::quaternionMsgToTF(odometry->pose.pose.orientation, q);
       transform.setRotation(q);
 
-      localized_scans.emplace_back(laser, transform);
+      localized_scans.emplace_back(*laser, transform);
 
       if (!laser_transform_init)
       {
         //std::cout << "laser " << laser << std::endl;
 
         tf::Transform laser_transform_tf;
-        tf::transformMsgToTF(transform_msg.transform, laser_transform_tf);
+        tf::transformMsgToTF(transform_msg->transform, laser_transform_tf);
 
         auto rel = transform.inverseTimes(laser_transform_tf);
 
