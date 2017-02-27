@@ -7,6 +7,7 @@
 #include <geometry_msgs/PoseArray.h>
 
 #include <pal_carmen_reader/pal_carmen_reader.h>
+#include <laser_odometry_core/laser_odometry.h>
 
 using LocalizedRangeScan = std::pair<sensor_msgs::LaserScan, tf::Transform>;
 
@@ -15,6 +16,23 @@ int main(int argc, char **argv)
   ros::init(argc, argv, "simple_odometry_icp");
 
   ros::NodeHandle nh("~");
+
+  std::string laser_odometry_type;
+  if(!nh.getParam("laser_odometry_type", laser_odometry_type))
+  {
+    ROS_ERROR("No laser odometry type specified: use param _ilaser_odometry_type:=[type]");
+    return EXIT_FAILURE;
+  }
+
+  laser_odometry::LaserOdometryPtr laser_odom_ptr = std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
+
+  bool publish_tf = true;
+  nh.param("publish_tf", publish_tf, publish_tf);
+  laser_odom_ptr->broadcastTf(publish_tf);
+
+  double sleep(0.005);
+  nh.param("visualization_sleep", sleep, sleep);
+  ros::Duration sleep_duration(sleep);
 
   std::string scans_file;
   if(!nh.getParam("input_file", scans_file))
@@ -32,18 +50,14 @@ int main(int argc, char **argv)
 
   bool laser_transform_init = false;
   geometry_msgs::TransformStamped laser_transform;
-  while (read_ok)
+
+  do
   {
     sensor_msgs::LaserScan laser;
     nav_msgs::Odometry odometry;
     geometry_msgs::TransformStamped transform_msg;
 
     read_ok = carmen_reader_ptr_->readNext("ROBOTLASER1", &laser, &odometry, &transform_msg);
-
-//    std::cout << "size " << laser.ranges.size() << std::endl;
-//    for (auto i : laser.ranges)
-//      std::cout << " " << i;
-//    std::cout << "\n" << std::endl;
 
     if (read_ok)
     {
@@ -74,36 +88,28 @@ int main(int argc, char **argv)
         laser_transform_init = true;
       }
     }
-  }
+  } while (read_ok);
 
   std::cout << "Loaded " << localized_scans.size() << " scans." << std::endl;
 
-  if (localized_scans.size()) return EXIT_SUCCESS;
+  if (localized_scans.empty()) return EXIT_SUCCESS;
 
-  // Some parameters
+  geometry_msgs::PoseArray corrected_poses, estimated_poses;
+//  corrected_poses.header.frame_id = "map";
+//  estimated_poses.header.frame_id = "map";
 
-  std::size_t max_iteration = (std::size_t)nh.param("registration_max_iteration", 20);
-  std::size_t num_reg_scan  = (std::size_t)nh.param("scan_window_size", 1);
-
-  std::size_t matcher_type  = (std::size_t)nh.param("matcher_type", 0);
-
-  std::vector<int> prunner_type_list  = nh.param("prunner_type_list", std::vector<int>{1});
-
-  std::size_t predictor_type  = (std::size_t)nh.param("predictor_type", 1);
-
-  std::size_t objective_type  = (std::size_t)nh.param("objective_type", 0);
-
-  std::size_t control_type  = (std::size_t)nh.param("control_type", 0);
-
-  ros::Publisher publisher_corrected_poses;
-  geometry_msgs::PoseArray corrected_poses; corrected_poses.header.frame_id = "map";
+  ros::Publisher publisher_corrected_poses, publisher_estimated_poses;
   publisher_corrected_poses = nh.advertise<geometry_msgs::PoseArray>("corrected_poses", 1);
+  publisher_estimated_poses = nh.advertise<geometry_msgs::PoseArray>("estimated_poses", 1);
 
   // Get initial pose
-  const tf::Transform init_pose_inv = localized_scans.begin()->second.inverse();
+  const tf::Transform origin = localized_scans.begin()->second;
+  const tf::Transform origin_inv = origin.inverse();
 
-//  lsr::geometry::RigidTransform3s tf_prev = lsr::geometry::Idendity3ds;
-//  lsr::geometry::RigidTransform3s tf_est  = lsr::geometry::Idendity3ds;
+  //laser_odom_ptr->setOrigin(origin);
+
+  tf::Transform tf_prev; tf_prev.setIdentity();
+  tf::Transform tf_est;  tf_est.setIdentity();
 
   //nav_msgs::Odometry odometry_w;
   nav_msgs::Path path;
@@ -113,40 +119,54 @@ int main(int argc, char **argv)
 
 //  pal_robot_tools::TimerData timer("toto");
 
-  tf::Transform global_pose, relative_pose;
-  geometry_msgs::Transform global_pose_msg;
+  tf::Transform corrected_pose;
 
   std::size_t scan_id = 0;
   // Pass all scans
   for (const auto &p : localized_scans)
   {
-    if (!ros::ok()) break;
+    if (!ros::ok())
+    {
+      std::cerr << "Ros down, exit." << std::endl;
+      break;
+    }
 
     std::cout << "\n\n ------------------------------------"
               << " \n\tProcessing scan " << scan_id++
               << "\n ------------------------------------\n" << std::endl;
 
-    const sensor_msgs::LaserScan& ros_scan = p.first;
+//    const sensor_msgs::LaserScan& ros_scan = p.first;
+    const sensor_msgs::LaserScanPtr ros_scan = boost::make_shared<sensor_msgs::LaserScan>(p.first);
 
     // Get tf with respect to initial pose being I &
     // convert to lsr format.
-//    lsr::geometry::RigidTransform3s tf_w =
-//        conversion::fromRos(init_pose_inv * p.second);
+    corrected_pose = origin_inv * p.second;
 
     // Get current tf with respect to previous one
-//    const lsr::geometry::RigidTransform3s tf_rel = tf_prev.inverse() * tf_w;
+//    const tf::Transform corrected_relative_pose = tf_prev.inverse() * corrected_pose;
 
 //    timer.startTimer();
 
     /* ----------- Everything Takes Place Here ---------- */
 
-    // bool processed = @todo.process(ros_scan, global_pose, relative_pose);
+    geometry_msgs::PoseWithCovarianceStampedPtr estimated_pose;
+    estimated_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
+
+    /*bool processed =*/ laser_odom_ptr->process(ros_scan, estimated_pose);
+
+    //  @todo.process(ros_scan, global_pose, relative_pose);
 
     /* -------------------------------------------------- */
 
 //   timer.stopTimer();
 
 //    tf_est = @todo.getEstimatedPose();
+
+    geometry_msgs::Transform corrected_pose_msg;
+    tf::transformTFToMsg(corrected_pose, corrected_pose_msg);
+
+    std::cout << "corrected_pose\n"  << corrected_pose_msg << std::endl;
+    std::cout << "estimated_pose\n"  << estimated_pose->pose.pose << std::endl;
 
 //    std::cout << "tf\n"  << tf_w.matrix() << std::endl;
 //    std::cout << "tf_rel "
@@ -159,17 +179,37 @@ int main(int argc, char **argv)
 //              << " t " << tf_rel_est.translation().norm() << "\n"
 //              << tf_rel_est.matrix() << std::endl;
 
-//    tf_prev = tf_w;
+//    tf_prev = corrected_pose;
 
     //std::cout << "\n\n------Publishing Logs------\n\n" << std::endl;
 
-    tf::transformTFToMsg(global_pose, global_pose_msg);
-//    corrected_poses.poses.push_back(global_pose_msg);
+
+
+    geometry_msgs::Pose corrected_pose_msg2;
+    corrected_pose_msg2.position.x = corrected_pose_msg.translation.x;
+    corrected_pose_msg2.position.y = corrected_pose_msg.translation.y;
+    corrected_pose_msg2.position.z = corrected_pose_msg.translation.z;
+
+    corrected_pose_msg2.orientation = corrected_pose_msg.rotation;
+
+    corrected_poses.poses.push_back(corrected_pose_msg2);
+    estimated_poses.poses.push_back(estimated_pose->pose.pose);
+
+    corrected_poses.header.frame_id = estimated_pose->header.frame_id;
+    estimated_poses.header.frame_id = estimated_pose->header.frame_id;
+
+    publisher_estimated_poses.publish(estimated_poses);
     publisher_corrected_poses.publish(corrected_poses);
 
+    ros::spinOnce();
+    sleep_duration.sleep();
+
+//    if (scan_id > 70) break;
   }
 
 //  std::cout << "Took in average : " << timer.getAverageCycleTime() << std::endl;
+
+  std::cout << "Done." << std::endl;
 
   return EXIT_SUCCESS;
 }
