@@ -1,16 +1,15 @@
-#include "scan_gpar_odometry/gpar_matcher.h"
-#include "scan_gpar_odometry/filter.h"
-#include "scan_gpar_odometry/visualization.h"
-
-#include "scan_gpar_odometry/log_parser.h"
-
 #include <ros/ros.h>
+#include <tf/tf.h>
 #include <sensor_msgs/LaserScan.h>
 #include <visualization_msgs/Marker.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
+#include <geometry_msgs/PoseArray.h>
 
-#include <pal_robot_tools/TimeProfiler.h>
+#include <pal_rosbag_reader/pal_rosbag_reader.h>
+#include <laser_odometry_core/laser_odometry.h>
+
+#include <benchmark_2d_laser_odom/timer.h>
 
 using LocalizedRangeScan = std::pair<sensor_msgs::LaserScan, tf::Transform>;
 
@@ -20,56 +19,86 @@ int main(int argc, char **argv)
 
   ros::NodeHandle nh("~");
 
-  std::string scans_file;
-  if(!nh.getParam("input_file", scans_file))
+  std::string laser_odometry_type;
+  if(!nh.getParam("laser_odometry_type", laser_odometry_type))
+  {
+    ROS_ERROR("No laser odometry type specified: use param _laser_odometry_type:=[type]");
+    return EXIT_FAILURE;
+  }
+
+  laser_odometry::LaserOdometryPtr laser_odom_ptr =
+      std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
+
+  bool publish_tf = true;
+  nh.param("publish_tf", publish_tf, publish_tf);
+  laser_odom_ptr->broadcastTf(publish_tf);
+
+  bool use_odom_prior = false;
+  nh.param("use_odom_prior", use_odom_prior, use_odom_prior);
+
+  double sleep(0.005);
+  nh.param("visualization_sleep", sleep, sleep);
+  ros::Duration sleep_duration(sleep);
+
+  std::string rosbag_file;
+  if(!nh.getParam("input_file", rosbag_file))
   {
     ROS_ERROR("No input file specified: use param _input_file:=[scans]");
-    exit(EXIT_FAILURE);
+    return EXIT_FAILURE;
+  }
+
+  std::string laser_scan_topic;
+  if(!nh.getParam("laser_scan_topic", laser_scan_topic))
+  {
+    ROS_ERROR("No input file specified: use param _laser_scan_topic:=[topic]");
+    return EXIT_FAILURE;
+  }
+
+  std::string odometry_topic;
+  if(!nh.getParam("odometry_topic", odometry_topic))
+  {
+    ROS_ERROR("No input file specified: use param _odometry_topic:=[topic]");
+    return EXIT_FAILURE;
   }
 
   std::vector<LocalizedRangeScan> localized_scans;
 
-  std::shared_ptr<pal::CarmenReader> carmen_reader_ptr_;
-  carmen_reader_ptr_ = std::make_shared<pal::CarmenReader>(scans_file);
+  std::shared_ptr<pal::RosbagReader> rosbag_reader_ptr_;
+  rosbag_reader_ptr_ = std::make_shared<pal::RosbagReader>(rosbag_file);
 
   bool read_ok = true;
 
   bool laser_transform_init = false;
   geometry_msgs::TransformStamped laser_transform;
-  while (read_ok)
+
+  sensor_msgs::LaserScanPtr laser = boost::make_shared<sensor_msgs::LaserScan>();
+  nav_msgs::OdometryPtr odometry = boost::make_shared<nav_msgs::Odometry>();
+  geometry_msgs::TransformStampedPtr transform_msg = boost::make_shared<geometry_msgs::TransformStamped>();
+
+  do
   {
-    sensor_msgs::LaserScan laser;
-    nav_msgs::Odometry odometry;
-    geometry_msgs::TransformStamped transform_msg;
+    read_ok = rosbag_reader_ptr_->readNext(laser_scan_topic, laser/*, odometry, transform_msg*/);
 
-    read_ok = carmen_reader_ptr_->readNext("ROBOTLASER1", &laser, &odometry, &transform_msg);
-
-//    std::cout << "size " << laser.ranges.size() << std::endl;
-//    for (auto i : laser.ranges)
-//      std::cout << " " << i;
-//    std::cout << "\n" << std::endl;
-
+    /// @todo retrieve laser relative to base.
     if (read_ok)
     {
-      tf::Vector3 basis(odometry.pose.pose.position.x,
-                        odometry.pose.pose.position.y,
-                        odometry.pose.pose.position.z);
+      tf::Transform transform = tf::Transform::getIdentity();
+//      transform.setOrigin(tf::Vector3{odometry->pose.pose.position.x,
+//                                      odometry->pose.pose.position.y,
+//                                      odometry->pose.pose.position.z});
 
-      tf::Transform transform;
-      transform.setOrigin(basis);
+//      tf::Quaternion q;
+//      tf::quaternionMsgToTF(odometry->pose.pose.orientation, q);
+//      transform.setRotation(q);
 
-      tf::Quaternion q;
-      tf::quaternionMsgToTF(odometry.pose.pose.orientation, q);
-      transform.setRotation(q);
-
-      localized_scans.emplace_back(laser, transform);
+      localized_scans.emplace_back(*laser, transform);
 
       if (!laser_transform_init)
       {
         //std::cout << "laser " << laser << std::endl;
 
-        tf::Transform laser_transform_tf;
-        tf::transformMsgToTF(transform_msg.transform, laser_transform_tf);
+        tf::Transform laser_transform_tf = tf::Transform::getIdentity();
+        tf::transformMsgToTF(transform_msg->transform, laser_transform_tf);
 
         auto rel = transform.inverseTimes(laser_transform_tf);
 
@@ -78,168 +107,143 @@ int main(int argc, char **argv)
         laser_transform_init = true;
       }
     }
-  }
+  } while (read_ok);
 
   std::cout << "Loaded " << localized_scans.size() << " scans." << std::endl;
 
-  // Some parameters
+  if (localized_scans.empty()) return EXIT_SUCCESS;
 
-  std::size_t max_iteration = (std::size_t)nh.param("registration_max_iteration", 20);
-  std::size_t num_reg_scan  = (std::size_t)nh.param("scan_window_size", 1);
+  geometry_msgs::PoseArray corrected_poses, estimated_poses;
+//  corrected_poses.header.frame_id = "map";
+//  estimated_poses.header.frame_id = "map";
 
-  std::size_t matcher_type  = (std::size_t)nh.param("matcher_type", 0);
-
-  std::vector<int> prunner_type_list  = nh.param("prunner_type_list", std::vector<int>{1});
-
-  std::size_t predictor_type  = (std::size_t)nh.param("predictor_type", 1);
-
-  std::size_t objective_type  = (std::size_t)nh.param("objective_type", 0);
-
-  std::size_t control_type  = (std::size_t)nh.param("control_type", 0);
-
-  ros::Publisher publisher_corrected_poses;
-  geometry_msgs::PoseArray corrected_poses; corrected_poses.header.frame_id = "map";
+  ros::Publisher publisher_corrected_poses, publisher_estimated_poses;
   publisher_corrected_poses = nh.advertise<geometry_msgs::PoseArray>("corrected_poses", 1);
-
-
-  lsr::FilterCascade scan_filters;
-  scan_filters.add(lsr::NaNFilter);
-  scan_filters.add(lsr::InfFilter);
-  scan_filters.add(lsr::MinRangeFilter);
-  scan_filters.add(lsr::MaxRangeFilter);
-
-//  scan_filters.add(lsr::NaNFilter,      lsr::InfFilter,
-//                   lsr::MinRangeFilter, lsr::MaxRangeFilter);
-
-//  std::cout << "FilterCascade init" << std::endl;
-//  exit(1);
-
-
-  std::cout << "Instantiating GPARMatcher." << std::endl;
-
-  lsr::GPARMatcher gpar(num_reg_scan, max_iteration);
-
-
-  auto correspondence_matcher_ptr = conversion::selectMatcher(matcher_type);
-
-  gpar.setCorrespondenceMatcher(correspondence_matcher_ptr);
-
-  auto correspondence_prunners_ptr = conversion::selectPrunners(prunner_type_list);
-
-  gpar.setCorrespondencePrunners(correspondence_prunners_ptr);
-
-  gpar.setKeyFrameSelectorType(std::make_shared<lsr::SimpleKeyFrameSelector>(0.1, 0.1));
-//  gpar.setKeyFrameSelectorType(std::make_shared<lsr::OverlapKeyFrameSelector>(0.75));
-
-  auto predictor_ptr = conversion::selectPredictor(predictor_type);
-
-  gpar.setTransformPredictor(predictor_ptr);
-
-  auto obj_type = conversion::selectObjective(objective_type);
-
-  gpar.setObjectiveType(obj_type);
-
-  auto cont_type = conversion::selectControl(control_type);
-
-  gpar.setControlType(cont_type);
-
-  std::cout << "Instantiating GPARMatcher." << std::endl;
-
-  lsr::GPARLogVisualizer visualizer(num_reg_scan);
+  publisher_estimated_poses = nh.advertise<geometry_msgs::PoseArray>("estimated_poses", 1);
 
   // Get initial pose
-  const tf::Transform init_pose_inv = localized_scans.begin()->second.inverse();
+  const tf::Transform origin = localized_scans.begin()->second;
+  const tf::Transform origin_inv = origin.inverse();
 
-  lsr::ScanParametersPtr scan_param_ptr = std::make_shared<lsr::ScanParameters>(
-        conversion::fromRos(localized_scans.begin()->first));
+  //laser_odom_ptr->setOrigin(origin);
 
-  {
-    tf::Transform t;
-    tf::transformMsgToTF(laser_transform.transform, t);
-    lsr::geometry::RigidTransform3s tlsr = conversion::fromRos(t);
-    scan_param_ptr->sensor_pose = tlsr;
-    //scan_param_ptr->sensor_pose = lsr::geometry::Idendity3ds;
-  }
-
-  lsr::geometry::RigidTransform3s tf_prev = lsr::geometry::Idendity3ds;
-  lsr::geometry::RigidTransform3s tf_est  = lsr::geometry::Idendity3ds;
+  tf::Transform tf_prev; tf_prev.setIdentity();
+  tf::Transform tf_est;  tf_est.setIdentity();
 
   //nav_msgs::Odometry odometry_w;
   nav_msgs::Path path;
   path.header.frame_id = "map";
 
-  lsr::geometry::RigidTransform3s tf_rel_est = lsr::geometry::Idendity3ds;
+//  lsr::geometry::RigidTransform3s tf_rel_est = lsr::geometry::Idendity3ds;
 
-  pal_robot_tools::TimerData timer("toto");
+//  pal_robot_tools::TimerData timer("toto");
+  pal::TimerU timer;
+
+  tf::Transform corrected_pose;
+
+  tf::Transform initial_guess; initial_guess.setIdentity();
 
   std::size_t scan_id = 0;
-  // Pass all scans, project each wrt the previous one
+  // Pass all scans
   for (const auto &p : localized_scans)
   {
-    if (!ros::ok()) break;
+    if (!ros::ok())
+    {
+      std::cerr << "Ros down, exit." << std::endl;
+      break;
+    }
 
     std::cout << "\n\n ------------------------------------"
               << " \n\tProcessing scan " << scan_id++
               << "\n ------------------------------------\n" << std::endl;
 
-    if ( scan_id < 55 ) continue;
-
-    const sensor_msgs::LaserScan& ros_scan = p.first;
+//    const sensor_msgs::LaserScan& ros_scan = p.first;
+    const sensor_msgs::LaserScanPtr ros_scan = boost::make_shared<sensor_msgs::LaserScan>(p.first);
 
     // Get tf with respect to initial pose being I &
     // convert to lsr format.
-    lsr::geometry::RigidTransform3s tf_w =
-        conversion::fromRos(init_pose_inv * p.second);
+    corrected_pose = origin_inv * p.second;
 
     // Get current tf with respect to previous one
-    const lsr::geometry::RigidTransform3s tf_rel = tf_prev.inverse() * tf_w;
+//    const tf::Transform corrected_relative_pose = tf_prev.inverse() * corrected_pose;
 
-    timer.startTimer();
+    /* ----------- Everything Takes Place Here ---------- */
 
-    lsr::Scan laser_scan = conversion::fromRos(ros_scan, scan_param_ptr);
-    //std::cout << "scan_param_ptr\n" << *scan_param_ptr << std::endl;
-    //std::cout << "Scan\n" << laser_scan << std::endl;
+    geometry_msgs::PoseWithCovarianceStampedPtr estimated_pose;
+    estimated_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
 
-    scan_filters.filter(laser_scan);
+    /// @todo
+    if (use_odom_prior) laser_odom_ptr->setInitialGuess(initial_guess);
 
-    lsr::GPARLogPtr log;
+    /*bool processed =*/ laser_odom_ptr->process(ros_scan, estimated_pose);
 
-//    tf_rel_est = lsr::geometry::Idendity3ds;
+    std::cout << "Process done." << std::endl;
 
-    // ----------- Everything Takes Place Here ----------
+    //  @todo.process(ros_scan, global_pose, relative_pose);
 
-    /*bool gpar_new_scan =*/ gpar.addScan(laser_scan, tf_rel_est, log);
+    /* -------------------------------------------------- */
 
-    timer.stopTimer();
+   timer.tic();
 
-    //std::cout << "Adding scan : " << gpar_new_scan << std::endl;
+//    tf_est = @todo.getEstimatedPose();
 
-    tf_est = gpar.getEstimatedPose();
+    geometry_msgs::Transform corrected_pose_msg;
+    tf::transformTFToMsg(corrected_pose, corrected_pose_msg);
 
-    std::cout << "tf\n"  << tf_w.matrix() << std::endl;
-    std::cout << "tf_rel "
-              << " yaw " << extractYaw(tf_rel)
-              << " t " << tf_rel.translation().norm() << "\n"
-              << tf_rel.matrix() << std::endl;
-    std::cout << "tf estimated\n" << tf_est.matrix() << std::endl;
-    std::cout << "tf_rel estimated "
-              << " yaw " << extractYaw(tf_rel_est)
-              << " t " << tf_rel_est.translation().norm() << "\n"
-              << tf_rel_est.matrix() << std::endl;
+    std::cout << "corrected_pose\n"  << corrected_pose_msg << std::endl;
+    std::cout << "estimated_pose\n"  << estimated_pose->pose.pose << std::endl;
 
-    tf_prev = tf_w;
+//    std::cout << "tf\n"  << tf_w.matrix() << std::endl;
+//    std::cout << "tf_rel "
+//              << " yaw " << extractYaw(tf_rel)
+//              << " t " << tf_rel.translation().norm() << "\n"
+//              << tf_rel.matrix() << std::endl;
+//    std::cout << "tf estimated\n" << tf_est.matrix() << std::endl;
+//    std::cout << "tf_rel estimated "
+//              << " yaw " << extractYaw(tf_rel_est)
+//              << " t " << tf_rel_est.translation().norm() << "\n"
+//              << tf_rel_est.matrix() << std::endl;
+
+//    tf_prev = corrected_pose;
 
     //std::cout << "\n\n------Publishing Logs------\n\n" << std::endl;
 
-    corrected_poses.poses.push_back(conversion::toRos<geometry_msgs::Pose>(tf_w));
-    publisher_corrected_poses.publish(corrected_poses);
 
-    visualizer.publish(log);
+    bool sleep_pub = false;
+    if (publisher_corrected_poses.getNumSubscribers()>0)
+    {
+      geometry_msgs::Pose corrected_pose_msg2;
+      corrected_pose_msg2.position.x = corrected_pose_msg.translation.x;
+      corrected_pose_msg2.position.y = corrected_pose_msg.translation.y;
+      corrected_pose_msg2.position.z = corrected_pose_msg.translation.z;
+      corrected_pose_msg2.orientation = corrected_pose_msg.rotation;
 
-//    if ( scan_id > 65 ) break;
+      corrected_poses.poses.push_back(corrected_pose_msg2);
+      corrected_poses.header.frame_id = estimated_pose->header.frame_id;
+      publisher_corrected_poses.publish(corrected_poses);
+
+      sleep_pub = true;
+    }
+
+    if (publisher_estimated_poses.getNumSubscribers()>0)
+    {
+      estimated_poses.poses.push_back(estimated_pose->pose.pose);
+      estimated_poses.header.frame_id = estimated_pose->header.frame_id;
+      publisher_estimated_poses.publish(estimated_poses);
+
+      sleep_pub = true;
+    }
+
+    ros::spinOnce();
+
+    if (sleep_pub) sleep_duration.sleep();
+
+//    if (scan_id > 70) break;
   }
 
-  std::cout << "Took in average : " << timer.getAverageCycleTime() << std::endl;
+  std::cout << "Took in average : " << timer.avg_tic() << " us." << std::endl;
+
+  std::cout << "Done." << std::endl;
 
   return EXIT_SUCCESS;
 }

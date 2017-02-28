@@ -24,6 +24,7 @@
   <build_depend>tf</build_depend>
   <build_depend>geometry_msgs</build_depend>
   <build_depend>pal_carmen_reader</build_depend>
+  <build_depend>pal_rosbag_reader</build_depend>
   <build_depend>laser_odometry_canonical</build_depend>
   <build_depend>laser_odometry_gpar</build_depend>
 
@@ -32,6 +33,7 @@
   <run_depend>tf</run_depend>
   <run_depend>geometry_msgs</run_depend>
   <run_depend>pal_carmen_reader</run_depend>
+  <run_depend>pal_rosbag_reader</run_depend>
   <run_depend>laser_odometry_canonical</run_depend>
   <run_depend>laser_odometry_gpar</run_depend>
 

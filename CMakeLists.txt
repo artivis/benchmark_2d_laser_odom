@@ -28,6 +28,7 @@ find_package(catkin REQUIRED COMPONENTS
 #tf_conversions
 #cmake_modules
   pal_carmen_reader
+  pal_rosbag_reader
   laser_odometry_canonical
   laser_odometry_gpar
 )
@@ -147,7 +148,12 @@ include_directories(
 add_executable(carmen_benchmark src/carmen_benchmark.cpp)
  target_link_libraries(carmen_benchmark
    ${catkin_LIBRARIES}
- )
+)
+
+add_executable(rosbag_benchmark src/rosbag_benchmark.cpp)
+ target_link_libraries(rosbag_benchmark
+   ${catkin_LIBRARIES}
+)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
