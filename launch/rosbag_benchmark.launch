@@ -1,0 +1,28 @@
+<launch>
+
+  <arg name="input_file" default="$(find pal_rosbag_reader)/data/tiago_small_office.bag"/>
+
+  <arg name="use_odom_prior"      default="True"/>
+  <arg name="publish_tf"          default="True"/>
+
+  <arg name="laser_scan_topic" default="/scan"/>
+  <arg name="odometry_topic" default="/mobile_base_controller/odom"/>
+  <arg name="odometry_gt_topic" default="/ground_truth_odom"/>
+
+  <arg name="visualization_sleep" default="0.005"/>
+
+  <!--arg name="laser_odometry_type" default="laser_odometry::LaserOdometryCanonical"/-->
+  <arg name="laser_odometry_type" default="laser_odometry::LaserOdometryGpar"/>
+
+  <node pkg="benchmark_2d_laser_odom" type="rosbag_benchmark" name="rosbag_benchmark" output="screen">
+    <param name="laser_odometry_type" value="$(arg laser_odometry_type)" />
+    <param name="input_file"          value="$(arg input_file)" />
+    <param name="use_odom_prior"      value="$(arg use_odom_prior)" />
+    <param name="publish_tf"          value="$(arg publish_tf)" />
+    <param name="laser_scan_topic"    value="$(arg laser_scan_topic)" />
+    <param name="odometry_topic"      value="$(arg odometry_topic)" />
+    <param name="odometry_gt_topic"   value="$(arg odometry_gt_topic)" />
+    <param name="visualization_sleep" value="$(arg visualization_sleep)" />
+  </node>
+
+</launch>
