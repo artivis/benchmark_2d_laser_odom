@@ -59,7 +59,7 @@ int main(int argc, char **argv)
   geometry_msgs::TransformStamped laser_transform;
 
   sensor_msgs::LaserScanPtr laser = boost::make_shared<sensor_msgs::LaserScan>();
-  nav_msgs::OdometryPtr odometry = boost::make_shared<nav_msgs::Odometry>();
+  nav_msgs::OdometryPtr odometry  = boost::make_shared<nav_msgs::Odometry>();
   geometry_msgs::TransformStampedPtr transform_msg = boost::make_shared<geometry_msgs::TransformStamped>();
 
   do
@@ -142,6 +142,7 @@ int main(int argc, char **argv)
 
     /* ----------- Everything Takes Place Here ---------- */
 
+//    print(corrected_relative_pose, "corrected_relative_pose : ");
     std::cout << "corrected_relative_pose : "
               << corrected_relative_pose.getOrigin().getX()
               << " " << corrected_relative_pose.getOrigin().getX()
@@ -150,8 +151,8 @@ int main(int argc, char **argv)
     /// @todo
     if (use_odom_prior) laser_odom_ptr->setInitialGuess(corrected_relative_pose);
 
-    geometry_msgs::PoseWithCovarianceStampedPtr estimated_pose;
-    estimated_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
+    nav_msgs::OdometryPtr estimated_pose;
+    estimated_pose = boost::make_shared<nav_msgs::Odometry>();
 
     /*bool processed =*/ laser_odom_ptr->process(ros_scan, estimated_pose);
 
