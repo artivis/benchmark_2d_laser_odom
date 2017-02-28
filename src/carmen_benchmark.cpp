@@ -8,6 +8,7 @@
 
 #include <pal_carmen_reader/pal_carmen_reader.h>
 #include <laser_odometry_core/laser_odometry.h>
+#include <laser_odometry_core/laser_odometry_utils.h>
 
 #include <benchmark_2d_laser_odom/timer.h>
 
@@ -33,7 +34,7 @@ int main(int argc, char **argv)
   nh.param("publish_tf", publish_tf, publish_tf);
   laser_odom_ptr->broadcastTf(publish_tf);
 
-  bool use_odom_prior = false;
+  bool use_odom_prior = true;
   nh.param("use_odom_prior", use_odom_prior, use_odom_prior);
 
   double sleep(0.005);
@@ -67,17 +68,16 @@ int main(int argc, char **argv)
 
     if (read_ok)
     {
-      tf::Transform transform;
-      transform.setOrigin(tf::Vector3{odometry->pose.pose.position.x,
-                                      odometry->pose.pose.position.y,
-                                      odometry->pose.pose.position.z});
-
       tf::Quaternion q;
       tf::quaternionMsgToTF(odometry->pose.pose.orientation, q);
-      transform.setRotation(q);
+
+      tf::Transform transform(q, tf::Vector3{odometry->pose.pose.position.x,
+                                             odometry->pose.pose.position.y,
+                                             0});
 
       localized_scans.emplace_back(*laser, transform);
 
+      // Retrieve transform laser to base
       if (!laser_transform_init)
       {
         //std::cout << "laser " << laser << std::endl;
@@ -99,34 +99,24 @@ int main(int argc, char **argv)
   if (localized_scans.empty()) return EXIT_SUCCESS;
 
   geometry_msgs::PoseArray corrected_poses, estimated_poses;
-//  corrected_poses.header.frame_id = "map";
-//  estimated_poses.header.frame_id = "map";
 
   ros::Publisher publisher_corrected_poses, publisher_estimated_poses;
   publisher_corrected_poses = nh.advertise<geometry_msgs::PoseArray>("corrected_poses", 1);
   publisher_estimated_poses = nh.advertise<geometry_msgs::PoseArray>("estimated_poses", 1);
 
-  // Get initial pose
+  // Get origin
   const tf::Transform origin = localized_scans.begin()->second;
   const tf::Transform origin_inv = origin.inverse();
 
   //laser_odom_ptr->setOrigin(origin);
 
-  tf::Transform tf_prev; tf_prev.setIdentity();
-  tf::Transform tf_est;  tf_est.setIdentity();
+  tf::Transform tf_prev = tf::Transform::getIdentity();
+//  tf::Transform tf_est  = tf::Transform::getIdentity();
 
-  //nav_msgs::Odometry odometry_w;
-  nav_msgs::Path path;
-  path.header.frame_id = "map";
-
-//  lsr::geometry::RigidTransform3s tf_rel_est = lsr::geometry::Idendity3ds;
-
-//  pal_robot_tools::TimerData timer("toto");
   pal::TimerU timer;
 
-  tf::Transform corrected_pose;
-
-  tf::Transform initial_guess; initial_guess.setIdentity();
+//  lsr::geometry::RigidTransform3s tf_rel_est = lsr::geometry::Idendity3ds;
+  tf::Transform corrected_pose = tf::Transform::getIdentity();
 
   std::size_t scan_id = 0;
   // Pass all scans
@@ -138,31 +128,34 @@ int main(int argc, char **argv)
       break;
     }
 
-    std::cout << "\n\n ------------------------------------"
-              << " \n\tProcessing scan " << scan_id++
-              << "\n ------------------------------------\n" << std::endl;
+    std::cout << "\n\n------------------------------------"
+              << "\n\t Processing scan "      << scan_id++
+              << "\n------------------------------------\n" << std::endl;
 
-//    const sensor_msgs::LaserScan& ros_scan = p.first;
     const sensor_msgs::LaserScanPtr ros_scan = boost::make_shared<sensor_msgs::LaserScan>(p.first);
 
-    // Get tf with respect to initial pose being I &
-    // convert to lsr format.
+    // Get tf with respect to initial pose being I
     corrected_pose = origin_inv * p.second;
 
     // Get current tf with respect to previous one
-//    const tf::Transform corrected_relative_pose = tf_prev.inverse() * corrected_pose;
+    tf::Transform corrected_relative_pose = tf_prev.inverse() * corrected_pose;
 
     /* ----------- Everything Takes Place Here ---------- */
+
+    std::cout << "corrected_relative_pose : "
+              << corrected_relative_pose.getOrigin().getX()
+              << " " << corrected_relative_pose.getOrigin().getX()
+              << " " << tf::getYaw(corrected_relative_pose.getRotation()) << std::endl;
+
+    /// @todo
+    if (use_odom_prior) laser_odom_ptr->setInitialGuess(corrected_relative_pose);
 
     geometry_msgs::PoseWithCovarianceStampedPtr estimated_pose;
     estimated_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
 
-    /// @todo
-    if (use_odom_prior) laser_odom_ptr->setInitialGuess(initial_guess);
-
     /*bool processed =*/ laser_odom_ptr->process(ros_scan, estimated_pose);
 
-    std::cout << "Process done." << std::endl;
+    //std::cout << "Process done." << std::endl;
 
     //  @todo.process(ros_scan, global_pose, relative_pose);
 
@@ -175,8 +168,14 @@ int main(int argc, char **argv)
     geometry_msgs::Transform corrected_pose_msg;
     tf::transformTFToMsg(corrected_pose, corrected_pose_msg);
 
-    std::cout << "corrected_pose\n"  << corrected_pose_msg << std::endl;
-    std::cout << "estimated_pose\n"  << estimated_pose->pose.pose << std::endl;
+    std::cout << "corrected_pose : "
+              << corrected_pose_msg.translation.x << " "
+              << corrected_pose_msg.translation.y << " "
+              << tf::getYaw(corrected_pose_msg.rotation) << std::endl;
+    std::cout << "estimated_pose : "
+              << estimated_pose->pose.pose.position.x << " "
+              << estimated_pose->pose.pose.position.y << " "
+              << tf::getYaw(estimated_pose->pose.pose.orientation) << std::endl;
 
 //    std::cout << "tf\n"  << tf_w.matrix() << std::endl;
 //    std::cout << "tf_rel "
@@ -189,11 +188,9 @@ int main(int argc, char **argv)
 //              << " t " << tf_rel_est.translation().norm() << "\n"
 //              << tf_rel_est.matrix() << std::endl;
 
-//    tf_prev = corrected_pose;
+    tf_prev = corrected_pose;
 
-    //std::cout << "\n\n------Publishing Logs------\n\n" << std::endl;
-
-
+    //std::cout << "\n\n------Publishing------\n\n" << std::endl;
     bool sleep_pub = false;
     if (publisher_corrected_poses.getNumSubscribers()>0)
     {
