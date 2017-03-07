@@ -37,11 +37,11 @@ int main(int argc, char **argv)
   }
 
   laser_odometry::LaserOdometryPtr laser_odom_ptr =
-      std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
+      laser_odometry::LaserOdometryInstantiater::instantiate(laser_odometry_type);
 
   bool publish_tf = true;
   nh.param("publish_tf", publish_tf, publish_tf);
-  laser_odom_ptr->broadcastTf(publish_tf);
+//  laser_odom_ptr->broadcastTf(publish_tf);
 
   bool use_odom_prior = false;
   nh.param("use_odom_prior", use_odom_prior, use_odom_prior);
@@ -83,8 +83,8 @@ int main(int argc, char **argv)
 
   bool read_ok = true;
 
-  sensor_msgs::LaserScanPtr laser   = boost::make_shared<sensor_msgs::LaserScan>();
-  nav_msgs::OdometryPtr odometry    = boost::make_shared<nav_msgs::Odometry>();
+  sensor_msgs::LaserScanPtr laser = boost::make_shared<sensor_msgs::LaserScan>();
+  nav_msgs::OdometryPtr odometry  = boost::make_shared<nav_msgs::Odometry>();
 
   // Load all scans
   do
@@ -102,20 +102,8 @@ int main(int argc, char **argv)
   {
     read_ok = rosbag_reader_ptr_->readNext(odometry_topic, odometry);
 
-    /// @todo retrieve laser relative to base.
-    if (read_ok)
-    {
-      //    tf::Transform transform = tf::Transform::getIdentity();
-      //      transform.setOrigin(tf::Vector3{odometry->pose.pose.position.x,
-      //                                      odometry->pose.pose.position.y,
-      //                                      odometry->pose.pose.position.z});
+    if (read_ok) odometry_msgs.emplace_back(*odometry);
 
-      //      tf::Quaternion q;
-      //      tf::quaternionMsgToTF(odometry->pose.pose.orientation, q);
-      //      transform.setRotation(q);
-
-      odometry_msgs.emplace_back(*odometry);
-    }
   } while (read_ok);
 
   // Load all odometry groundtruth
@@ -214,8 +202,8 @@ int main(int argc, char **argv)
 
 //    tf_est = @todo.getEstimatedPose();
 
-    geometry_msgs::Transform corrected_pose_msg;
-    tf::transformTFToMsg(corrected_pose, corrected_pose_msg);
+//   geometry_msgs::Transform corrected_pose_msg;
+//   tf::transformTFToMsg(corrected_pose, corrected_pose_msg);
 
 //    std::cout << "corrected_pose : "
 //              << corrected_pose_msg.translation.x << " "
@@ -227,7 +215,6 @@ int main(int argc, char **argv)
               << tf::getYaw(estimated_pose->pose.pose.orientation) << std::endl;
 
 //    tf_prev = corrected_pose;
-
 
     //std::cout << "\n\n------Publishing------\n\n" << std::endl;
     bool sleep_pub = false;

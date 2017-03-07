@@ -28,11 +28,11 @@ int main(int argc, char **argv)
   }
 
   laser_odometry::LaserOdometryPtr laser_odom_ptr =
-      std::make_shared<laser_odometry::LaserOdometry>(laser_odometry_type);
+      laser_odometry::LaserOdometryInstantiater::instantiate(laser_odometry_type);
 
   bool publish_tf = true;
   nh.param("publish_tf", publish_tf, publish_tf);
-  laser_odom_ptr->broadcastTf(publish_tf);
+//  laser_odom_ptr->broadcastTf(publish_tf);
 
   bool use_odom_prior = true;
   nh.param("use_odom_prior", use_odom_prior, use_odom_prior);
