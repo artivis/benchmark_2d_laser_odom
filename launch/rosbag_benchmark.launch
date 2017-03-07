@@ -11,10 +11,13 @@
 
   <arg name="visualization_sleep" default="0.005"/>
 
+  <arg name="config_file" default="$(find scan_gpar_odometry)/config/default_param.yaml"/>
+
   <!--arg name="laser_odometry_type" default="laser_odometry::LaserOdometryCanonical"/-->
   <arg name="laser_odometry_type" default="laser_odometry::LaserOdometryGpar"/>
 
   <node pkg="benchmark_2d_laser_odom" type="rosbag_benchmark" name="rosbag_benchmark" output="screen">
+    <rosparam file="$(arg config_file)" command="load" />
     <param name="laser_odometry_type" value="$(arg laser_odometry_type)" />
     <param name="input_file"          value="$(arg input_file)" />
     <param name="use_odom_prior"      value="$(arg use_odom_prior)" />
