@@ -30,7 +30,7 @@ find_package(catkin REQUIRED COMPONENTS
   pal_carmen_reader
   pal_rosbag_reader
   laser_odometry_canonical
-  laser_odometry_gpar
+#  laser_odometry_gpar
 )
 
 ## System dependencies are found with CMake's conventions
