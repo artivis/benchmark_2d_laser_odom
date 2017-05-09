@@ -7,7 +7,8 @@
 #include <geometry_msgs/PoseArray.h>
 
 #include <pal_carmen_reader/pal_carmen_reader.h>
-#include <laser_odometry_core/laser_odometry.h>
+#include <laser_odometry_core/laser_odometry_core.h>
+#include <laser_odometry_core/laser_odometry_instantiater.h>
 #include <laser_odometry_core/laser_odometry_utils.h>
 
 #include <benchmark_2d_laser_odom/timer.h>
@@ -28,7 +29,7 @@ int main(int argc, char **argv)
   }
 
   laser_odometry::LaserOdometryPtr laser_odom_ptr =
-      laser_odometry::LaserOdometryInstantiater::instantiate(laser_odometry_type);
+      laser_odometry::make_laser_odometry(laser_odometry_type);
 
   bool publish_tf = true;
   nh.param("publish_tf", publish_tf, publish_tf);

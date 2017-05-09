@@ -29,7 +29,7 @@ find_package(catkin REQUIRED COMPONENTS
 #cmake_modules
   pal_carmen_reader
   pal_rosbag_reader
-  laser_odometry_canonical
+  laser_odometry_csm
 #  laser_odometry_gpar
 )
 
